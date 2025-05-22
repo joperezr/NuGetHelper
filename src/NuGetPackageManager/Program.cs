@@ -15,9 +15,6 @@ namespace NuGetPackageManager
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine($"Delaying {DelayInMinutes} minutes before execution");
-            await Task.Delay((int)System.TimeSpan.FromMinutes(DelayInMinutes).TotalMilliseconds);
-
             var rootCommand = new RootCommand("NuGet package manager command-line app");
             var apiKeyOption = new Option<string>("--apiKeys", "Provide comma-separated list of PATs for the NuGet API account");
             //rootCommand.AddGlobalOption(apiKeyOption);
@@ -31,49 +28,85 @@ namespace NuGetPackageManager
         private static Command BuildDeprecateCommand()
         {
             var apiKeysOption = new Option<string>("--apiKeys", "Provide comma-separated list of PATs for the NuGet API account");
+            apiKeysOption.IsRequired = true;
             var packageIdOption = new Option<string>("--packageId", "The name of the package to deprecate");
-            var versionsOptions = new Option<string>("--versions", "Comma separated list of package versions to deprecate. Note, that all versions of the specified package will be deprecated.");
+            packageIdOption.IsRequired = true;
+            var versionsOptions = new Option<string>("--versions", "Comma separated list of package versions to deprecate. Not required if using --deprecateAllExceptLatest.");
+            versionsOptions.IsRequired = false;
             var messageOption = new Option<string>("--message", "The deprecation message to show in NuGet.org for each of the versions to be deprecated.");
+            messageOption.IsRequired = true;
+            var deprecateAllExceptLatestOption = new Option<bool>("--deprecateAllExceptLatest", "When set, all versions except the latest will be deprecated. The --versions parameter is ignored in this case.");
+            var whatIfOption = new Option<bool>("--what-if", "When set, shows which packages and versions would be deprecated without actually performing the operation.");
 
             var result = new Command("deprecate", "Deprecate specific versions of a specified package")
             {
                 apiKeysOption,
                 packageIdOption,
                 versionsOptions,
-                messageOption
+                messageOption,
+                deprecateAllExceptLatestOption,
+                whatIfOption
             };
 
             //AddForceOption(result);
 
             //var undoOption = new Option<bool>("--undo", "Calls the underlying NuGet APIs to undo deprecation of the specified package.");
             //result.AddOption(undoOption);
-
-            result.SetHandler(async (string apiKeys, string packageId, string versions, string message/*, bool force, bool undo*/) =>
+            
+            result.SetHandler(async (string apiKeys, string packageId, string versions, string message, bool deprecateAllExceptLatest, bool whatIf/*, bool force, bool undo*/) =>
             {
+                if (string.IsNullOrWhiteSpace(apiKeys))
+                {
+                    logger.LogError("No API keys provided. Please provide at least one API key using the --apiKeys option.");
+                    logger.LogInformation("Example: --apiKeys \"your-api-key-here\"");
+                    return;
+                }
+                
                 var keys = apiKeys.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (keys.Length == 0)
+                {
+                    logger.LogError("No valid API keys found. Please provide at least one non-empty API key using the --apiKeys option.");
+                    logger.LogInformation("Example: --apiKeys \"your-api-key-here\"");
+                    return;
+                }
+                
                 foreach (var key in keys)
                 {
-                    var deprecateOptions = new DeprecationOptions(key.Trim(), packageId, versions.Split(',', StringSplitOptions.RemoveEmptyEntries), message, true, false /*force, undo*/);
+                    var versionsList = deprecateAllExceptLatest ? 
+                        Array.Empty<string>() : // We'll get them dynamically in the handler if using deprecateAllExceptLatest
+                        (versions ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries);
+                        
+                    var deprecateOptions = new DeprecationOptions(key.Trim(), packageId, versionsList, message, true, false, deprecateAllExceptLatest, whatIf);
                     var handler = new CommandHandlers.DeprecateCommandHandler(deprecateOptions, logger);
                     if (await handler.TryHandle(deprecateOptions))
                         break;
                 }
-            }, apiKeysOption, packageIdOption, versionsOptions, messageOption);
+            }, apiKeysOption, packageIdOption, versionsOptions, messageOption, deprecateAllExceptLatestOption, whatIfOption);
 
             return result;
-        }
-
-        private static Command BuildUnlistCommand()
+        }        private static Command BuildUnlistCommand()
         {
             var result = new Command("unlist", "Unlist all versions of the specified packages");
 
-            var packageNamesOption = new Option<IEnumerable<string>>("--packages", "A comman-separated list of package names to unlist");
+            var apiKeyOption = new Option<string>("--apiKey", "The API key used for package management");
+            apiKeyOption.IsRequired = true;
+            result.AddOption(apiKeyOption);
+
+            var packageNamesOption = new Option<IEnumerable<string>>("--packages", "A comma-separated list of package names to unlist");
+            packageNamesOption.IsRequired = true;
             result.AddOption(packageNamesOption);
 
             AddForceOption(result);
 
             result.SetHandler(async (string apiKey, IEnumerable<string> packageNames, bool force) =>
             {
+                if (string.IsNullOrWhiteSpace(apiKey))
+                {
+                    logger.LogError("No API key provided. Please provide an API key using the --apiKey option.");
+                    logger.LogInformation("Example: --apiKey \"your-api-key-here\"");
+                    return;
+                }
+
                 var unlistOptions = new UnlistOptions(apiKey, packageNames, force);
                 var handler = new CommandHandlers.UnlistCommandHandler(unlistOptions, logger);
                 await handler.TryHandle(unlistOptions);

@@ -41,6 +41,7 @@ namespace NuGetPackageManager.CommandHandlers
         {
             HttpClient client = new HttpClient();
             client.DefaultRequestHeaders.Add("X-NuGet-ApiKey", this.options.ApiKey);
+            client.DefaultRequestHeaders.Add("User-Agent", "NuGetPackageManager/1.0");
 
             return new NuGetPackageManager(client, Logger);
         }
