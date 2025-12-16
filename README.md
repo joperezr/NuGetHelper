@@ -77,3 +77,105 @@ NuGetPackageManager.exe deprecate --apiKeys yourApiKeyGoesHere --packageId yourP
 ```
 
 The `--what-if` switch can be combined with any of the deprecation modes to see what would happen without making any actual changes. This is useful for verifying that the correct versions will be deprecated before running the command for real.
+
+## Aspire Package Deprecation Workflow
+
+The `DeprecateAspirePackages.ps1` script provides a two-phase workflow specifically designed for batch-deprecating Aspire packages with full control over what gets deprecated.
+
+### Workflow Overview
+
+1. **Generate a Plan** - Creates a JSON file listing all packages and versions that would be deprecated
+2. **Review and Edit** - Manually review and modify the plan as needed
+3. **Apply the Plan** - Execute the deprecations based on your edited plan
+
+### Step 1: Generate a Plan
+
+```powershell
+.\DeprecateAspirePackages.ps1 -GeneratePlan -OutputFile deprecation-plan.json
+```
+
+This searches NuGet.org for all `Aspire.*` packages and creates a JSON file with the proposed deprecations.
+
+### Step 2: Review and Edit the Plan
+
+Open `deprecation-plan.json` and review/modify as needed:
+
+```json
+{
+  "generatedAt": "2025-12-15T10:00:00Z",
+  "defaultMessage": "This version is out of support...",
+  "packages": [
+    {
+      "packageId": "Aspire.Hosting",
+      "latestVersion": "9.0.0",
+      "versionsToDeprecate": ["8.2.0", "8.1.0"],
+      "alreadyDeprecated": [
+        {
+          "version": "8.0.0",
+          "existingMessage": "Previously deprecated message",
+          "reasons": ["Legacy"]
+        }
+      ],
+      "message": null,
+      "action": "deprecate"
+    },
+    {
+      "packageId": "Aspire.Hosting.Redis",
+      "latestVersion": "9.0.0",
+      "versionsToDeprecate": ["8.2.0", "8.1.0"],
+      "alreadyDeprecated": [],
+      "message": "Custom message for this package",
+      "action": "deprecate"
+    }
+  ]
+}
+```
+
+> **Note:** The plan generator automatically checks NuGet.org for versions that are already deprecated and excludes them from `versionsToDeprecate`. These are listed in the `alreadyDeprecated` array for your reference, showing their existing deprecation message and reasons. This prevents accidentally overwriting custom deprecation messages.
+
+**Editing options:**
+
+| What you want to do | How to do it |
+|---------------------|--------------|
+| Skip a package entirely | Set `"action": "skip"` |
+| Keep specific versions from deprecation | Remove them from `versionsToDeprecate` array |
+| Use a custom message for a package | Set `"message": "Your custom message"` |
+| Remove a package from processing | Delete the entire package entry |
+| Use the default message | Keep `"message": null` |
+
+### Step 3: Apply the Plan
+
+```powershell
+# Preview what will happen (recommended first)
+.\DeprecateAspirePackages.ps1 -ApplyPlan deprecation-plan.json -ApiKey <your-api-key> -WhatIf
+
+# Actually apply the deprecations
+.\DeprecateAspirePackages.ps1 -ApplyPlan deprecation-plan.json -ApiKey <your-api-key>
+```
+
+### Script Parameters
+
+| Parameter | Description | Required |
+|-----------|-------------|----------|
+| `-GeneratePlan` | Generate a new deprecation plan | No |
+| `-OutputFile` | Path for the generated plan file (default: `deprecation-plan.json`) | No |
+| `-LatestVersionPrefix` | Only set `action=deprecate` for packages whose latest version starts with this prefix. Others default to `skip`. Useful for filtering to only packages you own. | No |
+| `-ApplyPlan` | Path to a plan file to apply | No |
+| `-ApiKey` | NuGet API key (required when applying) | For Apply |
+| `-DeprecationMessage` | Default deprecation message | No |
+| `-WhatIf` | Preview changes without applying | No |
+
+### Filtering by Version Prefix
+
+When you release Aspire packages, they all share the same version number (e.g., `9.0.0`). Third-party packages in the `Aspire.*` namespace (like `Aspire.Hosting.AWS`) will have different version numbers. Use `-LatestVersionPrefix` to automatically filter:
+
+```powershell
+# Only deprecate packages where latest version starts with "9.0"
+.\DeprecateAspirePackages.ps1 -GeneratePlan -LatestVersionPrefix "9.0" -OutputFile deprecation-plan.json
+```
+
+This will:
+- Set `action: "deprecate"` for packages like `Aspire.Hosting` (latest: `9.0.0`)
+- Set `action: "skip"` for packages like `Aspire.Hosting.AWS` (latest: `1.2.3`)
+
+You can still manually change the `action` in the JSON file before applying if needed.
